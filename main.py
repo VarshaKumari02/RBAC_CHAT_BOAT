@@ -28,7 +28,8 @@ from app.models import (
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-from app.routers import auth, roles, permissions, organizations, bookings
+from app.routers import auth, roles, permissions, organizations, bookings, chat
+
 
 
 # ── Lifespan: runs once on startup & shutdown ─────────────────────────────────
@@ -64,6 +65,8 @@ app.include_router(roles.router)
 app.include_router(permissions.router)
 app.include_router(organizations.router)
 app.include_router(bookings.router)
+app.include_router(chat.router)
+
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
