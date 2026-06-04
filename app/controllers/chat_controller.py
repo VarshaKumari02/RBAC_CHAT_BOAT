@@ -321,7 +321,6 @@ def select_schemas(query: str) -> tuple[str, list[str]]:
     return "\n".join([TABLE_SCHEMAS[name] for name in unique_selected]), unique_selected
 
 def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
-    # Guard: reject empty or excessively long messages before touching the LLM
     if not message or not message.strip():
         return ChatResponse(response="Please type a message before sending.", intent_detected="General")
     if len(message) > 500:
@@ -399,7 +398,6 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
         sql_match = re.search(r'```sql\s*(.*?)\s*```', sql_response, re.DOTALL | re.IGNORECASE)
         
         if not sql_match:
-            # It's a general text response or greeting. Sanitize and return directly.
             clean_response = sql_response.replace('\n', ' ').replace('\r', ' ').replace('**', '').replace('*', '')
             clean_response = re.sub(r'\s+', ' ', clean_response).strip()
             return ChatResponse(response=clean_response, intent_detected="General")
@@ -420,16 +418,14 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
             )
             
         # 4.5. Python-level RBAC Table Restrictions (uses EXACT permission name sets)
-        user_perm_set = set(user_permissions_list)  # exact names from DB
+        user_perm_set = set(user_permissions_list)
         tables_requested = sql_query.lower()
 
         # Check if the SQL has a filter scoped to THIS specific user
-        # Pattern 1: WHERE user_id = X  or  WHERE users.id = X  (bookings, ltc_users, etc.)
         has_own_user_filter = bool(
             re.search(rf'(user_id|users\.id)\s*=\s*{current_user.id}\b', sql_query, re.IGNORECASE)
         )
-        # Pattern 2: WHERE id = X when querying the users table directly (profile queries)
-        # e.g. SELECT name, email FROM users WHERE id = 5
+
         if not has_own_user_filter and re.search(r'\bfrom\s+users\b', sql_query, re.IGNORECASE):
             has_own_user_filter = bool(
                 re.search(rf'\bid\s*=\s*{current_user.id}\b', sql_query, re.IGNORECASE)
@@ -456,7 +452,6 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
 
         # 3. For ITDC users querying global data — check exact permissions per table
         if user_type_str == 'itdc' and is_global_query:
-            # Check Bookings / Flights / Payment Transactions
             if any(re.search(rf'\b{t}\b', tables_requested) for t in ["bookings", "flight_segments", "booking_travellers", "payment_transactions"]):
                 if not user_perm_set.intersection(BOOKING_VIEW_PERMISSIONS):
                     return ChatResponse(response="You do not have the required permission to view system-wide booking data.", intent_detected="Blocked")
@@ -473,7 +468,6 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
 
         # 5. Enforce LIMIT 10 at Python level (LLM may forget)
         if "limit" not in sql_query.lower():
-            # Strip trailing semicolon before appending LIMIT
             sql_query = sql_query.rstrip(";")
             sql_query = sql_query + " LIMIT 10"
 
@@ -489,12 +483,12 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
             for col, val in zip(columns, row):
                 if val is None:
                     row_dict[col] = None
-                elif hasattr(val, "isoformat"):        # datetime / date
+                elif hasattr(val, "isoformat"):
                     row_dict[col] = val.isoformat()
-                elif isinstance(val, Decimal):         # Decimal — convert to float for JSON
+                elif isinstance(val, Decimal):
                     row_dict[col] = float(val)
                 else:
-                    row_dict[col] = val                # int, str, bool — pass through as-is
+                    row_dict[col] = val
             formatted_results.append(row_dict)
             
         # 6. Ask the LLM to format the query results into a nice paragraph response
