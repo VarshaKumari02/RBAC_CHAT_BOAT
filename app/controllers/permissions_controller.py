@@ -40,7 +40,6 @@ def create_permission(payload: PermissionCreate, db: Session) -> Permission:
     existing = db.query(Permission).filter(Permission.name == payload.name).first()
     if existing:
         if existing.status == "deleted":
-            # Resurrect the deleted permission
             existing.status = "active"
             existing.description = payload.description
             existing.permission_group_id = payload.permission_group_id

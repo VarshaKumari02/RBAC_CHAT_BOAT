@@ -3,8 +3,90 @@ from sqlalchemy import text
 from app.models.users import User
 from app.services.llm_service import generate_llm_response
 from app.schemas.chat import ChatResponse
+from decimal import Decimal
 import json
 import re
+
+# Permissions that allow viewing booking data globally (ITDC admin only)
+BOOKING_VIEW_PERMISSIONS = {
+    "View Booking Monitor",
+    "View Booking Report",
+    "View Rescheduled Booking Report",
+    "Hold Booking Report",
+    "View Cancellation Report",
+    "Cancellation Request",
+    "View Cancellation Details",
+    "Initiate Cancellation Request",
+    "View Distress Report",
+    "View Ageing Report",
+    "Airline Bookings Report Download",
+    "Cancellation Bookings Report Download",
+    "Distress Report Download",
+    "Ageing Report Download",
+    "Client Wise Report Download",
+    "View Client Wise Report",
+    "PNR Mismatch",
+    "Manage PNR",
+    "Preview Refund",
+    "Initiate Refund for Credit",
+    "Initiate Refund for Direct Payment",
+    "Download Credit Note",
+    "Processing LCC Reconciliation",
+}
+
+# Permissions that allow viewing wallet/credit data globally (ITDC admin only)
+WALLET_VIEW_PERMISSIONS = {
+    "View Wallets",
+    "TopUp Wallets",
+    "Debit Wallets",
+    "Make Payment Against Invoice",
+    "Make Advance Payment",
+    "Make Payment Against Deductions",
+    "View Credit Summary Report",
+    "View Credit History Report",
+    "View Wallet Payments Report",
+    "Credit Summary Report Download",
+    "Credit History Report Download",
+    "Wallet Payments Report Download",
+    "View Invoice Details",
+}
+
+# Permissions that allow viewing user records globally (ITDC admin only)
+USER_VIEW_PERMISSIONS = {
+    "View LTC Users",
+    "View B2C Users",
+    "View B2G Users",
+    "Create B2G Users",
+    "Update B2G Users",
+    "Delete B2G Users",
+    "View ATT Users",
+    "Create ATT Users",
+    "Update ATT Users",
+    "Delete ATT Users",
+    "View CAPF Users",
+    "Create CAPF Users",
+    "Update CAPF Users",
+    "Delete CAPF Users",
+    "View Admin Users",
+    "Create Admin Users",
+    "Update Admin Users",
+    "Delete Admin Users",
+    "Change Status",
+    "Resend Create Password Email",
+}
+
+# Permissions that allow viewing roles/permissions tables (ITDC admin only)
+ROLE_PERMISSION_VIEW_PERMISSIONS = {
+    "View Roles",
+    "Create Roles",
+    "Update Roles",
+    "Delete Roles",
+    "Assign Permissions",
+    "View Permissions",
+    "Create Permissions",
+    "Update Permissions",
+    "Delete Permissions",
+}
 
 TABLE_SCHEMAS = {
     "users": """
@@ -58,107 +140,172 @@ Columns:
   - role_id (Integer, ForeignKey to roles.id)
   - organization_id (Integer, ForeignKey to organizations.id, Nullable)
     """,
-    "organizations": """
-Table: organizations
-Columns:
-  - id (Integer, Primary Key)
-  - name (String)
-  - description (String)
-  - organization_type (Enum: 'government', 'private', 'travel_agent')
-  - wallet_access (Enum: 'yes', 'no')
-  - status (Enum: 'active', 'inactive')
-    """,
     "bookings": """
 Table: bookings
 Columns:
-  - id (Integer, Primary Key)
-  - user_id (Integer, ForeignKey to users.id)
-  - organization_id (Integer, ForeignKey to organizations.id)
+  - id (BigInteger, Primary Key)
+  - user_id (BigInteger, ForeignKey to users.id, nullable)
+  - organization_id (BigInteger, nullable)
   - booking_reference (String)
-  - booking_type (String)
-  - booking_status (String)
+  - booking_type (Enum: 'flight', 'hotel', 'train')
+  - booking_status (Enum: 'pending', 'confirmed', 'cancelled', 'expired')
+  - journey_type (Enum: 'one_way', 'round_trip', 'multi_cities', nullable)
   - base_amount (Decimal)
   - total_taxes (Decimal)
-  - total_fees (Decimal)
+  - total_fees (Decimal, nullable)
   - total_amount (Decimal)
+  - remark (Text, nullable)
+  - issuing_authority (String, nullable)
+  - booking_resource (String, nullable)
+  - booking_expires_at (DateTime, nullable)
   - created_at (DateTime)
+  - updated_at (DateTime)
     """,
     "flight_segments": """
 Table: flight_segments (FlightSegment)
 Columns:
-  - id (Integer, Primary Key)
-  - booking_id (Integer, ForeignKey to bookings.id)
+  - id (BigInteger, Primary Key)
+  - booking_id (BigInteger, ForeignKey to bookings.id)
   - flight_number (String)
-  - departure_airport (String)
-  - arrival_airport (String)
+  - governing_carrier (String, airline code)
+  - departure_airport (String, IATA code)
+  - departure_terminal (String, nullable)
+  - arrival_airport (String, IATA code)
+  - arrival_terminal (String, nullable)
   - departure_date (DateTime)
   - arrival_date (DateTime)
+  - elapsed_time (Integer, flight duration in minutes)
   - seat_class (String)
   - ticket_price (Decimal)
-  - pnr (String)
-  - airline_pnr (String)
+  - brand_name (String, nullable)
+  - pnr (String, nullable)
+  - airline_pnr (String, nullable)
+  - from_city (String)
+  - to_city (String)
+  - is_layover (Enum: 'yes', 'no')
+  - trip_type (Enum: 'international', 'domestic')
+  - journey_type (String, nullable)
+  - status (Enum: 'scheduled', 'cancelled', 'completed', 'failed')
+  - created_at (DateTime)
     """,
     "booking_travellers": """
 Table: booking_travellers (BookingTraveller)
 Columns:
-  - id (Integer, Primary Key)
-  - bookings_id (Integer, ForeignKey to bookings.id)
-  - flight_segment_id (Integer, ForeignKey to flight_segments.id)
+  - id (BigInteger, Primary Key)
+  - bookings_id (BigInteger, ForeignKey to bookings.id)   -- NOTE: column is 'bookings_id'
+  - booking_flights_id (BigInteger, ForeignKey to flight_segments.id)  -- NOTE: column is 'booking_flights_id'
   - firstname (String)
+  - middlename (String, nullable)
   - lastname (String)
   - email (String)
+  - dob (Date, nullable)
   - mobile (String)
-  - passport_number (String)
-  - seat_number (String)
-  - status (String)
+  - age (Integer, nullable)
+  - gender (Enum: 'M', 'F', 'U')
+  - traveller_type (Enum: 'ADT', 'CNN', 'INF', 'STU', 'SCP')
+  - passport_number (String, nullable)
+  - seat_number (String, nullable)
+  - ticket_number (String, nullable)
+  - pnr (String, nullable)
+  - airline_pnr (String, nullable)
+  - status (Enum: 'pending', 'confirmed', 'cancelled', 'failed')
+  - organization_id (BigInteger, nullable)
+  - created_at (DateTime)
     """,
     "wallets": """
 Table: wallets
 Columns:
-  - id (Integer, Primary Key)
-  - wallet_code (String)
-  - organization_id (Integer, ForeignKey to organizations.id)
+  - id (BigInteger, Primary Key)
+  - wallet_code (String, unique)
+  - organization_id (BigInteger, ForeignKey to organizations.id)
   - balance (Decimal)
-  - currency_code (String)
+  - currency_code (String, default 'INR')
   - wallet_type (Enum: 'limited', 'unlimited')
-  - status (Enum: 'active', 'inactive')
+  - wallet_limit_value (Decimal, nullable)
+  - status (Enum: 'active', 'pending', 'blocked', 'inactive')
+  - last_transaction_at (DateTime, nullable)
+  - created_at (DateTime)
     """,
     "wallet_transactions": """
 Table: wallet_transactions
 Columns:
-  - id (Integer, Primary Key)
-  - wallet_id (Integer, ForeignKey to wallets.id)
-  - transaction_by (Integer, ForeignKey to users.id)
-  - transaction_type (Enum: 'credit', 'debit')
+  - id (BigInteger, Primary Key)
+  - transaction_code (String, unique)
+  - wallet_id (BigInteger, ForeignKey to wallets.id)
+  - transaction_by (BigInteger, ForeignKey to users.id)
+  - transaction_method (Enum: 'bank transfer', 'card', 'manual adjustment')
+  - transaction_type (Enum: 'credit', 'debit', 'refund', 'adjustment')
+  - credit_source (Enum: 'credit card', 'net banking', 'debit card', 'wallet', 'upi', nullable)
   - amount (Decimal)
-  - status (Enum: 'pending', 'completed', 'failed')
+  - previous_balance (Decimal, nullable)
+  - current_balance (Decimal, nullable)
+  - description (String)
+  - status (Enum: 'pending', 'completed', 'failed', 'reversed')
+  - transaction_utr (String, nullable)
+  - created_at (DateTime)
+    """,
+    "payment_transactions": """
+Table: payment_transactions
+Columns:
+  - id (BigInteger, Primary Key)
+  - transaction_code (String, unique)
+  - bookings_id (BigInteger, ForeignKey to bookings.id)
+  - wallet_transactions_id (BigInteger, ForeignKey to wallet_transactions.id, nullable)
+  - initiated_by (BigInteger, ForeignKey to users.id)
+  - transaction_type (Enum: 'payment', 'refund')
+  - amount (Decimal)
+  - gateway_transaction_id (String, nullable)
+  - parent_payment_transaction_id (String, nullable)
+  - remarks (Text, nullable)
+  - payment_status (String)
+  - payment_method_code (String, nullable)
+  - transaction_mode (Enum: 'online', 'offline')
   - created_at (DateTime)
     """,
     "ltc_users": """
 Table: ltc_users (LtcUser)
 Columns:
-  - id (Integer, Primary Key)
-  - user_id (Integer, ForeignKey to users.id)
+  - user_id (BigInteger, Primary Key, ForeignKey to users.id)  -- NOTE: PK is user_id, not id
   - firstname (String)
+  - middlename (String, nullable)
   - lastname (String)
-  - organization_id (Integer, ForeignKey to organizations.id)
+  - gender (Enum: 'm', 'f', 'o')
+  - organization_id (BigInteger, ForeignKey to organizations.id, nullable)
+  - department_id (BigInteger, nullable)
+  - ltc_organization_name (String, nullable)
+  - ltc_department_name (String, nullable)
+  - identification_number (String, nullable)
+  - wallet_access (Enum: 'yes', 'no')
+  - created_at (DateTime)
+    """,
+    "organizations": """
+Table: organizations
+Columns:
+  - id (Integer, Primary Key)
+  - name (String, unique)
+  - description (String, nullable)
+  - organization_type (Enum: 'government', 'psu')  -- NOTE: only government and psu types exist
+  - wallet_access (Boolean, true/false)             -- NOTE: Boolean, not enum
+  - status (Enum: 'active', 'blocked')
+  - created_at (DateTime)
     """
 }
 
-def select_schemas(query: str) -> str:
-    selected = ["users"] # Always include users
+def select_schemas(query: str) -> tuple[str, list[str]]:
+    selected = ["users"]
     
-    role_kw = ["role", "permission", "group", "privilege", "access"]
-    booking_kw = ["booking", "flight", "traveller", "passenger", "pnr", "ticket", "segment"]
-    wallet_kw = ["wallet", "transaction", "balance", "money", "credit", "debit", "funds"]
-    org_kw = ["org", "organization", "company", "department"]
+    role_kw   = ["role", "permission", "privilege"]
+    booking_kw = ["booking", "flight", "traveller", "passenger", "pnr", "ticket", "segment",
+                  "cancellation", "refund", "rescheduled", "distress", "ageing", "hold"]
+    wallet_kw  = ["wallet", "balance", "credit", "debit", "funds", "invoice", "payment", "topup"]
+    org_kw     = ["org", "organization", "company", "department", "agent"]
     
     if any(k in query for k in role_kw):
         selected.extend(["roles", "permissions", "permission_groups", "role_has_permissions", "user_has_roles"])
     if any(k in query for k in booking_kw):
-        selected.extend(["bookings", "flight_segments", "booking_travellers"])
+        selected.extend(["bookings", "flight_segments", "booking_travellers", "payment_transactions"])
     if any(k in query for k in wallet_kw):
-        selected.extend(["wallets", "wallet_transactions"])
+        selected.extend(["wallets", "wallet_transactions", "payment_transactions"])
     if any(k in query for k in org_kw):
         selected.extend(["organizations", "ltc_users"])
         
@@ -167,17 +314,23 @@ def select_schemas(query: str) -> str:
         if s not in unique_selected and s in TABLE_SCHEMAS:
             unique_selected.append(s)
             
-    # Default to sending all schemas if it doesn't clearly match a keyword to remain flexible
+    # If nothing matched, only send the user-safe schemas (not everything)
     if len(unique_selected) <= 1:
-        unique_selected = list(TABLE_SCHEMAS.keys())
+        unique_selected = ["users", "bookings", "flight_segments", "booking_travellers", "payment_transactions"]
         
-    return "\n".join([TABLE_SCHEMAS[name] for name in unique_selected])
+    return "\n".join([TABLE_SCHEMAS[name] for name in unique_selected]), unique_selected
 
 def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
+    # Guard: reject empty or excessively long messages before touching the LLM
+    if not message or not message.strip():
+        return ChatResponse(response="Please type a message before sending.", intent_detected="General")
+    if len(message) > 500:
+        return ChatResponse(response="Your message is too long. Please keep it under 500 characters.", intent_detected="General")
+
     query = message.lower()
     
     # 1. Select relevant table schemas based on query keywords
-    schemas = select_schemas(query)
+    schemas, selected_tables = select_schemas(query)
     
     # Get current user details for context
     user_type_str = current_user.user_type.value if hasattr(current_user.user_type, "value") else current_user.user_type
@@ -193,6 +346,19 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
     perm_result = db.execute(permissions_query, {"user_id": current_user.id}).fetchall()
     user_permissions_list = [row[0] for row in perm_result]
     
+    # Optimize tokens by filtering permissions to only those relevant to the selected tables
+    filtered_permissions = []
+    selected_tables_set = set(selected_tables)
+    if selected_tables_set.intersection({"bookings", "flight_segments", "booking_travellers", "payment_transactions"}):
+        filtered_permissions.extend([p for p in user_permissions_list if p in BOOKING_VIEW_PERMISSIONS])
+    if selected_tables_set.intersection({"wallets", "wallet_transactions", "payment_transactions"}):
+        filtered_permissions.extend([p for p in user_permissions_list if p in WALLET_VIEW_PERMISSIONS])
+    if "users" in selected_tables_set:
+        filtered_permissions.extend([p for p in user_permissions_list if p in USER_VIEW_PERMISSIONS])
+    if selected_tables_set.intersection({"roles", "permissions", "permission_groups", "role_has_permissions", "user_has_roles"}):
+        filtered_permissions.extend([p for p in user_permissions_list if p in ROLE_PERMISSION_VIEW_PERMISSIONS])
+    filtered_permissions = list(set(filtered_permissions))
+    
     # 2. Prompt LLM to write a SQL query or reply generally
     sql_prompt = (
         "You are an expert PostgreSQL database analyst.\n"
@@ -201,7 +367,7 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
         f"Context details of the logged-in user:\n"
         f"  - user_id = {current_user.id}\n"
         f"  - user_type = '{user_type_str}'\n"
-        f"  - user_permissions = {user_permissions_list}\n\n"
+        f"  - user_permissions = {filtered_permissions}\n\n"
         "IMPORTANT RULES:\n"
         f"1. STRICT PERMISSIONS & DATA ACCESS:\n"
         f"   - Normal Users (user_type != 'itdc'): Can ONLY see their own data. For any query, you MUST append `WHERE user_id = {current_user.id}`. If they ask for global tables that do not have a user_id (e.g., 'roles', 'permissions', 'all users'), you MUST REFUSE by returning a plain text message: 'You do not have permission to view this.' DO NOT write SQL.\n"
@@ -211,13 +377,17 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
         "4. Wrap the generated SQL inside a ```sql and ``` code block.\n"
         "5. Limit query results to 10 rows maximum.\n"
         "6. Do NOT write any INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, or CREATE statements.\n\n"
+        "IMPORTANT SCHEMA NOTES:\n"
+        "- In 'booking_travellers', the FK to bookings is 'bookings_id' (not 'booking_id').\n"
+        "- In 'booking_travellers', the FK to flight_segments is 'booking_flights_id' (not 'flight_segment_id').\n\n"
         "EXAMPLES:\n"
         "User: hi -> Output: Hello! How can I help you today?\n"
-        "User: what are the roles in my db (if user_type='itdc' and 'view_roles' in permissions) -> Output: ```sql\\nSELECT name FROM roles;\\n```\n"
-        "User: what are the roles in my db (if user lacks permission) -> Output: You do not have permission to view the roles.\n"
-        f"User: show my bookings and flight details -> Output: ```sql\\nSELECT b.booking_reference, b.booking_status, fs.flight_number, fs.departure_airport, fs.arrival_airport FROM bookings b JOIN flight_segments fs ON b.id = fs.booking_id WHERE b.user_id = {current_user.id};\\n```\n"
-        "User: what are the total bookings? (if user_type='itdc' and 'view_bookings' in permissions) -> Output: ```sql\\nSELECT COUNT(*) FROM bookings;\\n```\n"
-        "User: what is the total revenue? (if user_type='itdc' and 'view_bookings' in permissions) -> Output: ```sql\\nSELECT SUM(total_amount) FROM bookings;\\n```\n\n"
+        "User: what are the roles? (if user_type='itdc' and has 'View Roles' permission) -> Output: ```sql\\nSELECT name, description FROM roles;\\n```\n"
+        "User: what are the roles? (if user lacks permission) -> Output: You do not have permission to view the roles.\n"
+        f"User: what is my roles? -> Output: ```sql\\nSELECT r.name, r.description FROM roles r JOIN user_has_roles uhr ON r.id = uhr.role_id WHERE uhr.user_id = {current_user.id};\\n```\n"
+        f"User: show my bookings and flight details -> Output: ```sql\\nSELECT b.booking_reference, b.booking_status, fs.flight_number, fs.from_city, fs.to_city, fs.departure_date FROM bookings b JOIN flight_segments fs ON b.id = fs.booking_id WHERE b.user_id = {current_user.id};\\n```\n"
+        "User: total bookings? (if user_type='itdc' and has 'View Booking Monitor' permission) -> Output: ```sql\\nSELECT COUNT(*) FROM bookings;\\n```\n"
+        "User: total revenue? (if user_type='itdc' and has 'View Booking Report' permission) -> Output: ```sql\\nSELECT SUM(total_amount) FROM bookings;\\n```\n\n"
         f"User Message: {message}\n"
         "Answer:"
     )
@@ -238,8 +408,10 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
         
         # 4. Safe SQL validation checks
         sql_upper = sql_query.upper()
-        forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE"]
-        is_safe = sql_upper.startswith("SELECT") and not any(f in sql_upper for f in forbidden)
+        # Use regex word boundaries to prevent matching substrings (like 'created_at' matching 'CREATE')
+        is_safe = sql_upper.startswith("SELECT") and not bool(
+            re.search(r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|UNION)\b', sql_upper)
+        )
         
         if not is_safe:
             return ChatResponse(
@@ -247,42 +419,65 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
                 intent_detected="Blocked"
             )
             
-        # 4.5. Python-level RBAC Table Restrictions
-        # Check if the query is attempting to view global data (no user_id or organization_id filter)
-        is_global_query = not re.search(r'(user_id|organization_id|users\.id)\s*(=|IN|IS)', sql_query, re.IGNORECASE)
+        # 4.5. Python-level RBAC Table Restrictions (uses EXACT permission name sets)
+        user_perm_set = set(user_permissions_list)  # exact names from DB
         tables_requested = sql_query.lower()
-        
-        # 1. Strict System Tables (Roles & Permissions)
+
+        # Check if the SQL has a filter scoped to THIS specific user
+        # Pattern 1: WHERE user_id = X  or  WHERE users.id = X  (bookings, ltc_users, etc.)
+        has_own_user_filter = bool(
+            re.search(rf'(user_id|users\.id)\s*=\s*{current_user.id}\b', sql_query, re.IGNORECASE)
+        )
+        # Pattern 2: WHERE id = X when querying the users table directly (profile queries)
+        # e.g. SELECT name, email FROM users WHERE id = 5
+        if not has_own_user_filter and re.search(r'\bfrom\s+users\b', sql_query, re.IGNORECASE):
+            has_own_user_filter = bool(
+                re.search(rf'\bid\s*=\s*{current_user.id}\b', sql_query, re.IGNORECASE)
+            )
+
+        # A query is global if it has no user-specific filter
+        is_global_query = not has_own_user_filter
+
+        # 1. Strict System Tables (Roles & Permissions) — ITDC only with exact permission
         sys_tables = ["roles", "permissions", "permission_groups", "role_has_permissions", "user_has_roles"]
         if any(re.search(rf'\b{t}\b', tables_requested) for t in sys_tables):
-            if user_type_str != 'itdc':
-                return ChatResponse(response="You do not have permission to view global system data like roles or permissions.", intent_detected="Blocked")
-            if not any("role" in p.lower() or "permission" in p.lower() for p in user_permissions_list):
-                return ChatResponse(response="You do not have the required admin permission to view roles or permissions.", intent_detected="Blocked")
+            if is_global_query:
+                if user_type_str != 'itdc':
+                    return ChatResponse(response="You do not have permission to view system data like roles or permissions.", intent_detected="Blocked")
+                if not user_perm_set.intersection(ROLE_PERMISSION_VIEW_PERMISSIONS):
+                    return ChatResponse(response="You do not have the required permission to view roles or permissions.", intent_detected="Blocked")
 
-        # 2. Global Data Queries (Bookings, Wallets, Users)
-        if is_global_query:
-            if user_type_str != 'itdc':
-                # Normal users must always have a user_id or organization_id filter
-                return ChatResponse(response="You do not have permission to view global system data. Please ask about your own data.", intent_detected="Blocked")
-                
-            # For ITDC users, check specific permissions for the requested global data
-            # Check Bookings
-            if any(re.search(rf'\b{t}\b', tables_requested) for t in ["bookings", "flight_segments", "booking_travellers"]):
-                if not any("booking" in p.lower() or "flight" in p.lower() for p in user_permissions_list):
-                    return ChatResponse(response="You do not have the required admin permission to view system-wide bookings.", intent_detected="Blocked")
-                    
-            # Check Wallets
-            if any(re.search(rf'\b{t}\b', tables_requested) for t in ["wallets", "wallet_transactions"]):
-                if not any("wallet" in p.lower() or "transaction" in p.lower() for p in user_permissions_list):
-                    return ChatResponse(response="You do not have the required admin permission to view system-wide wallets.", intent_detected="Blocked")
-                    
-            # Check Users
+        # 2. For normal (non-itdc) users — must always query only their own data
+        if user_type_str != 'itdc' and is_global_query:
+            return ChatResponse(
+                response="You can only view your own data. Please ask about your own bookings or profile.",
+                intent_detected="Blocked"
+            )
+
+        # 3. For ITDC users querying global data — check exact permissions per table
+        if user_type_str == 'itdc' and is_global_query:
+            # Check Bookings / Flights / Payment Transactions
+            if any(re.search(rf'\b{t}\b', tables_requested) for t in ["bookings", "flight_segments", "booking_travellers", "payment_transactions"]):
+                if not user_perm_set.intersection(BOOKING_VIEW_PERMISSIONS):
+                    return ChatResponse(response="You do not have the required permission to view system-wide booking data.", intent_detected="Blocked")
+
+            # Check Wallets / Transactions / Payment Transactions
+            if any(re.search(rf'\b{t}\b', tables_requested) for t in ["wallets", "wallet_transactions", "payment_transactions"]):
+                if not user_perm_set.intersection(WALLET_VIEW_PERMISSIONS):
+                    return ChatResponse(response="You do not have the required permission to view system-wide wallet data.", intent_detected="Blocked")
+
+            # Check Users table globally
             if re.search(r'\busers\b', tables_requested):
-                if not any("user" in p.lower() for p in user_permissions_list):
-                    return ChatResponse(response="You do not have the required admin permission to view system-wide users.", intent_detected="Blocked")
+                if not user_perm_set.intersection(USER_VIEW_PERMISSIONS):
+                    return ChatResponse(response="You do not have the required permission to view system-wide user data.", intent_detected="Blocked")
 
-        # 5. Execute the SQL query on the database
+        # 5. Enforce LIMIT 10 at Python level (LLM may forget)
+        if "limit" not in sql_query.lower():
+            # Strip trailing semicolon before appending LIMIT
+            sql_query = sql_query.rstrip(";")
+            sql_query = sql_query + " LIMIT 10"
+
+        # Execute the SQL query on the database
         result = db.execute(text(sql_query))
         columns = list(result.keys())
         rows = result.fetchall()
@@ -292,12 +487,14 @@ def handle_chat(message: str, current_user: User, db: Session) -> ChatResponse:
         for row in rows:
             row_dict = {}
             for col, val in zip(columns, row):
-                if hasattr(val, "isoformat"):
+                if val is None:
+                    row_dict[col] = None
+                elif hasattr(val, "isoformat"):        # datetime / date
                     row_dict[col] = val.isoformat()
-                elif hasattr(val, "to_eng_string") or hasattr(val, "real"):
-                    row_dict[col] = str(val)
+                elif isinstance(val, Decimal):         # Decimal — convert to float for JSON
+                    row_dict[col] = float(val)
                 else:
-                    row_dict[col] = val
+                    row_dict[col] = val                # int, str, bool — pass through as-is
             formatted_results.append(row_dict)
             
         # 6. Ask the LLM to format the query results into a nice paragraph response
